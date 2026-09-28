@@ -150,6 +150,7 @@ PAGE = r"""
     <div class="actions">
         <button id="start" onclick="setReceiving(true)">Start Receiving</button>
         <button id="stop" onclick="setReceiving(false)">Stop Receiver</button>
+        <button id="clear" onclick="clearLogs()">Clear Logs</button>
         <a class="download" href="/download-excel">Download Excel</a>
     </div>
 </header>
@@ -170,8 +171,22 @@ PAGE = r"""
         </div>
     </div>
 
+    <div class="panel" style="margin-bottom:20px">
+        <div class="panel-title">Devices</div>
+        <div id="deviceTabs" style="padding:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="selectDevice('ALL')" style="background:#2563eb;color:white">
+                All Devices
+            </button>
+        </div>
+    </div>
+
     <div class="panel">
-        <div class="panel-title">Live Event Log</div>
+        <div class="panel-title">
+            Live Event Log
+            <span id="selectedDeviceLabel" style="float:right;color:#777;font-weight:normal">
+                All Devices
+            </span>
+        </div>
         <div class="table-wrap">
             <table>
                 <thead>
@@ -180,7 +195,8 @@ PAGE = r"""
                         <th>Device</th>
                         <th>IP</th>
                         <th>Key</th>
-                        <th>Event</th>
+                        <th>KEY_DOWN</th>
+                        <th>KEY_UP</th>
                         <th>Duration</th>
                         <th>Count</th>
                         <th>Type</th>
@@ -188,7 +204,7 @@ PAGE = r"""
                     </tr>
                 </thead>
                 <tbody id="tbody">
-                    <tr><td colspan="9" class="empty">No events received.</td></tr>
+                    <tr><td colspan="10" class="empty">No events received.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -196,6 +212,19 @@ PAGE = r"""
 </main>
 
 <script>
+let selectedDevice = 'ALL';
+
+function selectDevice(deviceId) {
+    selectedDevice = deviceId;
+    getStatus();
+}
+
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
+    return div.innerHTML;
+}
+
 async function getStatus() {
     const r = await fetch('/api/status', {cache: 'no-store'});
     const data = await r.json();
@@ -211,31 +240,73 @@ async function getStatus() {
 
     document.getElementById('deviceCount').textContent = data.device_count;
     document.getElementById('eventCount').textContent = data.event_count;
+
     document.getElementById('lastEvent').textContent =
         data.last_event || '—';
+
+    const deviceTabs = document.getElementById('deviceTabs');
+
+    deviceTabs.innerHTML =
+        '<button onclick="selectDevice(\\'ALL\\')" ' +
+        'style="background:#2563eb;color:white;border:0;border-radius:7px;padding:9px 13px;cursor:pointer">' +
+        'All Devices</button>';
+
+    for (const d of data.devices) {
+        const button = document.createElement('button');
+        button.textContent = d.label;
+        button.style.border = '0';
+        button.style.borderRadius = '7px';
+        button.style.padding = '9px 13px';
+        button.style.cursor = 'pointer';
+        button.style.background =
+            selectedDevice === d.id ? '#2563eb' : '#e5e7eb';
+        button.style.color =
+            selectedDevice === d.id ? 'white' : '#202124';
+        button.onclick = () => selectDevice(d.id);
+        deviceTabs.appendChild(button);
+    }
+
+    const filtered = selectedDevice === 'ALL'
+        ? data.events
+        : data.events.filter(e => e.device_id === selectedDevice);
+
+    document.getElementById('selectedDeviceLabel').textContent =
+        selectedDevice === 'ALL' ? 'All Devices' :
+        (data.devices.find(d => d.id === selectedDevice)?.label || selectedDevice);
 
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
 
-    if (!data.events.length) {
+    if (!filtered.length) {
         tbody.innerHTML =
-            '<tr><td colspan="9" class="empty">No events received.</td></tr>';
+            '<tr><td colspan="10" class="empty">No events for this device.</td></tr>';
         return;
     }
 
-    for (const e of data.events) {
+    for (const e of filtered) {
         const tr = document.createElement('tr');
+
         [
-            e.time, e.device, e.ip, e.key, e.event,
-            e.duration, e.count, e.type, e.data
+            e.time,
+            e.device,
+            e.ip,
+            e.key,
+            e.event === 'KEY_DOWN' ? e.key : '',
+            e.event === 'KEY_UP' ? e.key : '',
+            e.duration,
+            e.count,
+            e.type,
+            e.data
         ].forEach(value => {
             const td = document.createElement('td');
             td.textContent = value ?? '';
             tr.appendChild(td);
         });
+
         tbody.appendChild(tr);
     }
 }
+
 
 async function setReceiving(value) {
     await fetch('/api/receiving', {
@@ -245,6 +316,27 @@ async function setReceiving(value) {
     });
     getStatus();
 }
+
+
+async function clearLogs() {
+    const confirmed = confirm(
+        'Clear ALL received logs and device history? This cannot be undone.'
+    );
+
+    if (!confirmed) return;
+
+    const response = await fetch('/api/clear', {
+        method: 'POST'
+    });
+
+    if (response.ok) {
+        selectedDevice = 'ALL';
+        await getStatus();
+    } else {
+        alert('Unable to clear logs.');
+    }
+}
+
 
 getStatus();
 setInterval(getStatus, 1000);
@@ -315,7 +407,17 @@ def api_status():
                 f"{latest['event']}"
                 if latest else None
             ),
-            "events": list(reversed(events[-200:])),
+            "devices": [
+                {
+                    "id": device_id,
+                    "label": f"{device['name']} ({device['ip']})",
+                }
+                for device_id, device in devices.items()
+            ],
+            "events": [
+                dict(row, device_id=f"{row['device']}|{row['ip']}")
+                for row in reversed(events[-500:])
+            ],
         })
 
 
@@ -380,8 +482,9 @@ def create_excel():
 
     headers = [
         "time",
-        "Key pressed",
-        "event",
+        "Key",
+        "KEY_DOWN",
+        "KEY_UP",
         "duration",
         "Count",
         "type",
@@ -416,17 +519,24 @@ def create_excel():
                 cell.alignment = Alignment(horizontal="left")
 
             for row in rows_for_device:
+                # Put the key event into its own KEY_DOWN or KEY_UP column.
+                event_name = row["event"].upper()
+
+                key_down = row["key"] if event_name == "KEY_DOWN" else ""
+                key_up = row["key"] if event_name == "KEY_UP" else ""
+
                 sheet.append([
                     row["time"],
                     row["key"],
-                    row["event"],
+                    key_down,
+                    key_up,
                     row["duration"],
                     row["count"],
                     row["type"],
                     row["ip"],
                 ])
 
-            widths = [16, 18, 16, 14, 10, 14, 18]
+            widths = [16, 16, 16, 16, 14, 10, 14, 18]
             for i, width in enumerate(widths, 1):
                 sheet.column_dimensions[get_column_letter(i)].width = width
 
@@ -438,6 +548,21 @@ def create_excel():
     workbook.close()
     output.seek(0)
     return output
+
+
+
+@app.post("/api/clear")
+def clear_logs():
+    global events, devices
+
+    with receiver_lock:
+        events.clear()
+        devices.clear()
+
+    return jsonify({
+        "status": "ok",
+        "message": "All logs cleared.",
+    })
 
 
 @app.get("/download-excel")
