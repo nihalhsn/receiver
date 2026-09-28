@@ -148,9 +148,9 @@ PAGE = r"""
         </div>
     </div>
     <div class="actions">
-        <button id="start" onclick="setReceiving(true)">Start Receiving</button>
-        <button id="stop" onclick="setReceiving(false)">Stop Receiver</button>
-        <button id="clear" onclick="clearLogs()">Clear Logs</button>
+        <button type="button" id="start" onclick="setReceiving(true)">Start Receiving</button>
+        <button type="button" id="stop" onclick="setReceiving(false)">Stop Receiver</button>
+        <button type="button" id="clear" onclick="clearLogs()">Clear Logs</button>
         <a class="download" href="/download-excel">Download Excel</a>
     </div>
 </header>
@@ -309,22 +309,37 @@ async function getStatus() {
 
 
 async function setReceiving(value) {
+    const startButton = document.getElementById('start');
+    const stopButton = document.getElementById('stop');
+
+    startButton.disabled = true;
+    stopButton.disabled = true;
+
     try {
         const response = await fetch('/api/receiving', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({receiving: value})
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({ receiving: value })
         });
 
+        const bodyText = await response.text();
+
         if (!response.ok) {
-            const body = await response.text();
-            alert('Receiver control failed: HTTP ' + response.status + '\n' + body);
+            alert(
+                'Receiver control failed: HTTP ' +
+                response.status + '\n' + bodyText
+            );
             return;
         }
 
         await getStatus();
     } catch (error) {
-        alert('Receiver control failed: ' + error);
+        alert('Receiver control failed: ' + error.message);
+    } finally {
+        await getStatus();
     }
 }
 
@@ -436,8 +451,20 @@ def api_status():
 def api_receiving():
     global receiving
 
-    data = request.get_json(silent=True) or {}
-    value = bool(data.get("receiving", False))
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+
+    raw_value = data.get("receiving", False)
+
+    if isinstance(raw_value, bool):
+        value = raw_value
+    elif isinstance(raw_value, str):
+        value = raw_value.strip().lower() in (
+            "1", "true", "yes", "on"
+        )
+    else:
+        value = bool(raw_value)
 
     with receiver_lock:
         receiving = value
