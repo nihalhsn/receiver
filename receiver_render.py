@@ -246,10 +246,18 @@ async function getStatus() {
 
     const deviceTabs = document.getElementById('deviceTabs');
 
-    deviceTabs.innerHTML =
-        '<button onclick="selectDevice(\\'ALL\\')" ' +
-        'style="background:#2563eb;color:white;border:0;border-radius:7px;padding:9px 13px;cursor:pointer">' +
-        'All Devices</button>';
+    deviceTabs.innerHTML = '';
+
+    const allButton = document.createElement('button');
+    allButton.textContent = 'All Devices';
+    allButton.style.background = '#2563eb';
+    allButton.style.color = 'white';
+    allButton.style.border = '0';
+    allButton.style.borderRadius = '7px';
+    allButton.style.padding = '9px 13px';
+    allButton.style.cursor = 'pointer';
+    allButton.onclick = () => selectDevice('ALL');
+    deviceTabs.appendChild(allButton);
 
     for (const d of data.devices) {
         const button = document.createElement('button');
