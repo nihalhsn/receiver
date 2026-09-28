@@ -6,7 +6,8 @@ from datetime import datetime
 
 from flask import Flask, jsonify, render_template_string, request, send_file
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
 
 
 app = Flask(__name__)
@@ -552,9 +553,17 @@ def create_excel():
             device = rows_for_device[0]["device"]
             ip = rows_for_device[0]["ip"]
 
-            sheet = workbook.create_sheet(
-                safe_sheet_name(f"{device}_{ip}")
-            )
+            base_name = safe_sheet_name(f"{device}_{ip}")
+            sheet_name = base_name
+            suffix = 2
+
+            # Excel sheet names must be unique and max 31 characters.
+            while sheet_name in workbook.sheetnames:
+                suffix_text = f"_{suffix}"
+                sheet_name = (base_name[:31 - len(suffix_text)] + suffix_text)
+                suffix += 1
+
+            sheet = workbook.create_sheet(sheet_name)
 
             sheet["A1"] = f"{ip} ({device})"
             sheet["A1"].font = Font(size=14)
