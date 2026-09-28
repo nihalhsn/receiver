@@ -309,12 +309,23 @@ async function getStatus() {
 
 
 async function setReceiving(value) {
-    await fetch('/api/receiving', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({receiving: value})
-    });
-    getStatus();
+    try {
+        const response = await fetch('/api/receiving', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({receiving: value})
+        });
+
+        if (!response.ok) {
+            const body = await response.text();
+            alert('Receiver control failed: HTTP ' + response.status + '\n' + body);
+            return;
+        }
+
+        await getStatus();
+    } catch (error) {
+        alert('Receiver control failed: ' + error);
+    }
 }
 
 
@@ -434,7 +445,7 @@ def api_receiving():
     return jsonify({
         "status": "ok",
         "receiving": receiving,
-    })
+    }), 200
 
 
 @app.post("/events")
